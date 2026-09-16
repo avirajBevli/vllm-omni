@@ -473,6 +473,11 @@ class FalconPerceptionThinker(nn.Module, CustomProcessMixin, SupportsMultiModal,
             self.size_encoder = FourierEncoder(2, config.size_enc_dim, config.hidden_size)
             self.size_decoder = BboxDecoder(config.hidden_size, config.size_dec_dim, config.size_out_dim)
 
+        # ``postprocess`` stashes the last hidden state on GPU every step and
+        # ``preprocess`` reads it back next step; without this the runner
+        # round-trips it through CPU on both sides of every decode step.
+        self.gpu_resident_buffer_keys: set[tuple[str, str]] = {("hidden_states", "last")}
+
         # Lazily captured CUDA graph for the per-step geometry block; see
         # ``_geometry_embed_cached``.
         self._geom_graph: torch.cuda.CUDAGraph | None = None

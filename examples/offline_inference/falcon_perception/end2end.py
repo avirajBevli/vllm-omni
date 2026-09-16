@@ -26,6 +26,12 @@ from pathlib import Path
 
 import numpy as np
 import torch
+
+# Bare import, not relative: this script is run directly (``python end2end.py``),
+# which puts its own directory on ``sys.path`` but does not treat it as a
+# package -- a relative import would fail with "attempted relative import with
+# no known parent package".
+from _common import STOP_TOKEN_IDS, build_prompt, overlay
 from PIL import Image
 from vllm import SamplingParams
 
@@ -36,44 +42,6 @@ from vllm_omni.entrypoints.omni import Omni
 # name against ``vllm_omni/deploy/`` on one code path but reads it as a literal
 # path on another, so a bare name only works when the CWD happens to hold the file.
 DEPLOY_CONFIG = Path(vllm_omni.__file__).parent / "deploy" / "falcon_perception.yaml"
-
-# The reference stops on EOS (11) and <|end_of_query|> (263).
-STOP_TOKEN_IDS = [11, 263]
-
-PALETTE = [
-    (255, 59, 48),
-    (52, 199, 89),
-    (0, 122, 255),
-    (255, 149, 0),
-    (175, 82, 222),
-    (255, 204, 0),
-    (90, 200, 250),
-    (255, 45, 85),
-    (162, 132, 94),
-    (48, 209, 88),
-]
-
-
-def build_prompt(query: str) -> str:
-    """The exact string the model expects. Deviating here silently degrades output."""
-    return f"<|image|>Segment these expressions in the image:<|start_of_query|>{query}<|REF_SEG|>"
-
-
-def overlay(image: Image.Image, masks: np.ndarray) -> Image.Image:
-    """Draw each instance mask over the original image so a reviewer can eyeball it."""
-    canvas = image.convert("RGBA")
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    width, height = canvas.size
-    for i, mask in enumerate(masks):
-        colour = PALETTE[i % len(PALETTE)]
-        binary = np.asarray(mask) > 0
-        if binary.shape != (height, width):
-            rows = (np.arange(height) * binary.shape[0] / height).astype(int).clip(0, binary.shape[0] - 1)
-            cols = (np.arange(width) * binary.shape[1] / width).astype(int).clip(0, binary.shape[1] - 1)
-            binary = binary[rows][:, cols]
-        stencil = Image.fromarray((binary * 255).astype(np.uint8))
-        layer = Image.composite(Image.new("RGBA", canvas.size, (*colour, 115)), layer, stencil)
-    return Image.alpha_composite(canvas, layer).convert("RGB")
 
 
 def main() -> None:

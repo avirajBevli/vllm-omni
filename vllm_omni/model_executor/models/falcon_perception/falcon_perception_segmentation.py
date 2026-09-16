@@ -89,14 +89,26 @@ def _mask_nms(
     scale = min(1.0, nms_max_side / max(height, width))
     target_h = max(1, int(round(height * scale)))
     target_w = max(1, int(round(width * scale)))
-    masks = binary_masks.float()
-    if (height, width) != (target_h, target_w):
-        masks = F.interpolate(
-            masks.unsqueeze(1),
-            size=(target_h, target_w),
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(1)
+    if (height, width) == (target_h, target_w):
+        masks = binary_masks.float()
+    else:
+        # Cast and downsample one chunk at a time: casting the whole (N, H, W)
+        # uint8 tensor to float32 before downsampling defeats the chunking that
+        # bounds peak memory during mask decode (see ``_MASK_CHUNK`` above) --
+        # a dense scene's full-resolution masks can be hundreds of MB in
+        # float32 before this function ever needed more than the downsampled
+        # size at once.
+        downsampled = []
+        for start in range(0, count, _MASK_CHUNK):
+            block = binary_masks[start : start + _MASK_CHUNK].float()
+            block = F.interpolate(
+                block.unsqueeze(1),
+                size=(target_h, target_w),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(1)
+            downsampled.append(block)
+        masks = torch.cat(downsampled, dim=0)
 
     flat = masks.reshape(count, -1)
     areas = flat.sum(dim=1)
